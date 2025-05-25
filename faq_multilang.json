@@ -1,0 +1,34 @@
+{
+  "كيف أعمل خامة زجاج": {
+    "ar": {
+      "رد": "لعمل خامة زجاج في Cinema 4D، فعّل Transparency وضع IOR بين 1.5 - 1.6.",
+      "روابط": [
+        "https://www.youtube.com/watch?v=glass_tutorial",
+        "https://c4dtextures.com/free-glass-materials"
+      ]
+    },
+    "en": {
+      "رد": "To create glass material in Cinema 4D, enable Transparency and set IOR between 1.5 - 1.6.",
+      "روابط": [
+        "https://www.youtube.com/watch?v=glass_tutorial",
+        "https://c4dtextures.com/free-glass-materials"
+      ]
+    }
+  },
+  "طريقة عمل رندر سريع": {
+    "ar": {
+      "رد": "استخدم Physical Render مع تقليل قيم Sampling.",
+      "روابط": [
+        "https://www.youtube.com/watch?v=fast_render",
+        "https://help.maxon.net/c4d/ar/?r=RenderSettings"
+      ]
+    },
+    "en": {
+      "رد": "Use Physical Render with reduced Sampling values.",
+      "روابط": [
+        "https://www.youtube.com/watch?v=fast_render",
+        "https://help.maxon.net/c4d/en/?r=RenderSettings"
+      ]
+    }
+  }
+}
