@@ -25,7 +25,7 @@ jobs:
       run: huggingface-cli login --token ${{ secrets.HF_TOKEN }}
 
     - name: Clone Hugging Face Space repo
-      run: git clone https://huggingface.co/spaces/Cinema4dArabic/cinema_4d_hub
+      run: git clone https://${{ secrets.HF_TOKEN }}@huggingface.co/spaces/Cinema4dArabic/cinema_4d_hub
 
     - name: Copy files from main folder to Space repo
       run: |
