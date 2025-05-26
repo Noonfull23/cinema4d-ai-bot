@@ -1,9 +1,7 @@
-python-telegram-bot
+python-telegram-bot==20.6
 huggingface_hub
 transformers
 torch
 langdetect
-python-telegram-bot==20.6
 uvicorn
 fastapi
-
