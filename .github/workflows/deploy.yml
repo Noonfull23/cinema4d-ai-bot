@@ -3,7 +3,7 @@ name: Deploy to Hugging Face Space
 on:
   push:
     branches:
-      - main
+      - main  # أو الفرع الذي تستخدمه
 
 jobs:
   deploy:
@@ -16,7 +16,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: "3.9"
 
       - name: Install huggingface_hub
         run: pip install huggingface_hub
@@ -24,12 +24,9 @@ jobs:
       - name: Login to Hugging Face CLI
         run: echo "${{ secrets.HF_TOKEN }}" | huggingface-cli login --token
 
-      - name: Configure Git
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-
       - name: Push to Hugging Face Space
         run: |
-          git remote add hf https://huggingface.co/spaces/Cinema4dArabic/cinema_4d_hub
-          git push hf main --force
+          git config --global user.email "you@example.com"
+          git config --global user.name "Your Name"
+          git remote add space https://huggingface.co/spaces/Cinema4dArabic/cinema_4d_hub
+          git push space HEAD:main --force
