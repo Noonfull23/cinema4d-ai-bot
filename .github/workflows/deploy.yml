@@ -32,7 +32,7 @@ jobs:
 
       - name: Clone Hugging Face Space
         run: |
-          git clone https://huggingface.co/spaces/Cinema4dArabic/cinema_4d_hub
+           git clone https://${{ secrets.HF_TOKEN }}@huggingface.co/spaces/Cinema4dArabic/cinema_4d_hub
 
       - name: Copy files to Space repo
         run: |
