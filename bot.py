@@ -1,110 +1,246 @@
 import os
-from datetime import datetime
-from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+import logging
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    constants
+)
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
+)
 from huggingface_hub import InferenceClient
+from langdetect import detect, LangDetectException
 
-# إعداد المفاتيح
-bot_token = os.environ.get("BOT_TOKEN")
-hf_api_token = os.environ.get("HF_API_TOKEN")
-client = InferenceClient(model="mistralai/Mixtral-8x7B-Instruct-v0.1", token=hf_api_token)
+# --- إعداد Logging ---
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-# تخزين اللغة لكل مستخدم وسجل الأسئلة
-user_lang = {}
-user_logs = []  # مؤقتًا نستخدم قائمة في الذاكرة. يمكن نقلها إلى قاعدة بيانات لاحقًا.
+# --- متغيرات البيئة ---
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
 
-languages = {
-    "🇬🇧 English": "en",
-    "🇸🇦 العربية": "ar"
-}
+# --- إعداد خدمات Inference متعددة (يمكن إضافة خدمات أخرى بسهولة) ---
+services = [
+    InferenceClient(token=HF_API_TOKEN, repo_id="mistralai/Mixtral-8x7B-Instruct-v0.1"),
+    InferenceClient(token=HF_API_TOKEN, repo_id="TheBloke/Mistral-7B-Claude-Chat-GGUF"),
+]
 
-texts = {
-    "welcome": {
-        "en": "Welcome to the Cinema 4D Assistant Bot!\nChoose your language:",
-        "ar": "مرحبًا بك في مساعد Cinema 4D!\nيرجى اختيار لغتك:"
-    },
-    "help": {
-        "en": "Ask me anything about Cinema 4D!",
-        "ar": "اسألني عن Cinema 4D!"
-    },
-    "error": {
-        "en": "\u274c Something went wrong. Please try again.",
-        "ar": "\u274c حدث خطأ. حاول مرة أخرى."
-    },
-    "about": {
-        "en": "I'm a bot powered by AI to help you learn Cinema 4D step by step.",
-        "ar": "أنا بوت مدعوم بذكاء صناعي لمساعدتك في تعلم Cinema 4D خطوة بخطوة."
-    },
-    "feedback": {
-        "en": "You can send suggestions anytime. Just type your message.",
-        "ar": "يمكنك إرسال اقتراحاتك في أي وقت. فقط اكتب رسالتك."
-    }
-}
+# --- تخزين المحادثات مؤقتًا في الذاكرة {user_id: [ {role:"user|assistant", content:".."}, ... ]} ---
+user_contexts = {}
 
-# /start
+# --- تتبع خدمة الـInference المستخدمة لكل مستخدم لتبديل ذكي ---
+user_service_idx = {}
+
+# --- إعدادات ---
+MAX_CONTEXT_LENGTH = 3000  # تقريبياً عدد الحروف (يمكن تعديل حسب الحاجة)
+
+# --- دوال مساعدة ---
+
+def trim_context(context):
+    """
+    تقليص سياق المحادثة ليظل في حدود MAX_CONTEXT_LENGTH
+    """
+    total_len = 0
+    trimmed = []
+    # نبدأ من آخر الرسائل للخلف (للحفاظ على آخر المحادثات)
+    for msg in reversed(context):
+        total_len += len(msg["content"])
+        if total_len > MAX_CONTEXT_LENGTH:
+            break
+        trimmed.insert(0, msg)
+    return trimmed
+
+async def build_prompt(context_list):
+    """
+    بناء البرومبت للنموذج مع فواصل أدوار المحادثة.
+    """
+    prompt = ""
+    for msg in context_list:
+        role = "User" if msg["role"] == "user" else "Assistant"
+        prompt += f"{role}: {msg['content']}\n"
+    prompt += "Assistant: "
+    return prompt
+
+def get_user_service(user_id):
+    """
+    استرجاع رقم خدمة Inference المستخدمة حاليًا للمستخدم، أو 0 افتراضياً.
+    """
+    return user_service_idx.get(user_id, 0)
+
+def switch_user_service(user_id):
+    """
+    تبديل الخدمة المستخدمة (تدور بين الخدمات المتوفرة)
+    """
+    current_idx = user_service_idx.get(user_id, 0)
+    next_idx = (current_idx + 1) % len(services)
+    user_service_idx[user_id] = next_idx
+    return next_idx
+
+def get_language(text):
+    """
+    كشف لغة النص مع معالجة الأخطاء
+    """
+    try:
+        lang = detect(text)
+    except LangDetectException:
+        lang = "en"
+    return lang
+
+# --- أوامر التليجرام ---
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[k] for k in languages.keys()]
-    await update.message.reply_text(
-        texts["welcome"]["en"] + "\n" + texts["welcome"]["ar"],
-        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+    welcome_text = (
+        "مرحبًا بك في بوت دعم Cinema 4D الذكي!\n\n"
+        "يمكنك سؤالي أي شيء، وسأجيبك بأفضل ما أستطيع.\n"
+        "للبدء، فقط اكتب سؤالك.\n\n"
+        "أوامر مفيدة:\n"
+        "/reset - إعادة تعيين المحادثة\n"
+        "/help - عرض المساعدة\n"
     )
+    await update.message.reply_text(welcome_text)
 
-# اختيار اللغة
-async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang_key = update.message.text
-    if lang_key in languages:
-        lang = languages[lang_key]
-        user_lang[update.effective_user.id] = lang
-        await update.message.reply_text(texts["help"][lang])
-    else:
-        await update.message.reply_text("Invalid choice / اختيار غير صالح")
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        "البوت يدعم المحادثة الذكية مع حفظ سياق المحادثة.\n"
+        "يمكنك استخدام:\n"
+        "/reset - لمسح المحادثة الحالية\n"
+        "يمكنك كتابة أي سؤال أو طلب وسيتم الرد عليك.\n"
+        "أيضًا يمكنك استخدام الأزرار في أسفل الرسالة للتفاعل بشكل أسرع."
+    )
+    await update.message.reply_text(help_text)
 
-# الرد على الأسئلة
-async def reply_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    lang = user_lang.get(user_id, "en")
-    query = update.message.text
-    prompt = f"Answer this question about Cinema 4D in {lang}: {query}"
+    user_contexts[user_id] = []
+    user_service_idx[user_id] = 0
+    await update.message.reply_text("تم إعادة تعيين المحادثة، يمكنك البدء من جديد.")
+
+async def handle_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    text = update.message.text.strip()
+
+    # تحديث السياق
+    ctx = user_contexts.get(user_id, [])
+    ctx.append({"role": "user", "content": text})
+    ctx = trim_context(ctx)
+
+    prompt = await build_prompt(ctx)
+    user_contexts[user_id] = ctx
+
+    # اختيار خدمة inference
+    service_idx = get_user_service(user_id)
+    client = services[service_idx]
 
     try:
-        response = client.text_generation(prompt)
-        answer = response.strip()
-        await update.message.reply_text(answer)
-        user_logs.append({
-            "user_id": user_id,
-            "lang": lang,
-            "question": query,
-            "answer": answer,
-            "time": datetime.now().isoformat()
-        })
+        # طلب الرد من النموذج
+        response = client.text_generation(prompt, max_new_tokens=256, do_sample=True)
+        answer = response.generated_text[len(prompt):].strip()
+
+        # إضافة رد المساعد للسياق
+        ctx.append({"role": "assistant", "content": answer})
+        user_contexts[user_id] = ctx
+
+        # أزرار تفاعلية
+        keyboard = [
+            [
+                InlineKeyboardButton("إعادة صياغة", callback_data="rephrase"),
+                InlineKeyboardButton("إعادة تعيين", callback_data="reset"),
+                InlineKeyboardButton("تغيير اللغة", callback_data="change_lang"),
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await update.message.reply_text(answer, reply_markup=reply_markup, parse_mode=constants.ParseMode.MARKDOWN)
     except Exception as e:
-        print(f"Error: {e}")
-        await update.message.reply_text(texts["error"][lang])
+        logger.error(f"Error in text_generation: {e}")
+        # التبديل لخدمة أخرى تلقائيًا
+        new_idx = switch_user_service(user_id)
+        await update.message.reply_text(
+            f"حدث خطأ في الخدمة الحالية. أحاول التبديل لخدمة أخرى... (الخدمة {new_idx + 1})"
+        )
 
-# /about
-async def about(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = user_lang.get(update.effective_user.id, "en")
-    await update.message.reply_text(texts["about"][lang])
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    user_id = query.from_user.id
+    await query.answer()
 
-# /help
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = user_lang.get(update.effective_user.id, "en")
-    await update.message.reply_text(texts["help"][lang])
+    data = query.data
+    if data == "reset":
+        user_contexts[user_id] = []
+        user_service_idx[user_id] = 0
+        await query.edit_message_text("تمت إعادة تعيين المحادثة بنجاح. يمكنك البدء من جديد.")
+    elif data == "rephrase":
+        ctx = user_contexts.get(user_id, [])
+        if not ctx:
+            await query.edit_message_text("لا يوجد سياق لإعادة الصياغة، ابدأ بالسؤال أولًا.")
+            return
 
-# /feedback
-async def feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = user_lang.get(update.effective_user.id, "en")
-    await update.message.reply_text(texts["feedback"][lang])
+        # خذ آخر سؤال فقط لإعادة الصياغة
+        last_user_msg = None
+        for msg in reversed(ctx):
+            if msg["role"] == "user":
+                last_user_msg = msg["content"]
+                break
 
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(bot_token).build()
+        if not last_user_msg:
+            await query.edit_message_text("لم أجد سؤالًا لإعادة صياغته.")
+            return
+
+        # بناء برومبت خاص لإعادة الصياغة
+        rephrase_prompt = f"أعد صياغة السؤال التالي بطريقة أبسط وأكثر وضوحًا:\n{last_user_msg}"
+
+        # استخدم نفس خدمة المستخدم الحالية
+        service_idx = get_user_service(user_id)
+        client = services[service_idx]
+
+        try:
+            response = client.text_generation(rephrase_prompt, max_new_tokens=128)
+            new_question = response.generated_text[len(rephrase_prompt):].strip()
+            # استبدل آخر سؤال بالسؤال الجديد
+            for i in range(len(ctx) - 1, -1, -1):
+                if ctx[i]["role"] == "user":
+                    ctx[i]["content"] = new_question
+                    break
+            user_contexts[user_id] = ctx
+            await query.edit_message_text(f"تمت إعادة صياغة السؤال:\n\n{new_question}")
+        except Exception as e:
+            logger.error(f"Error in rephrase: {e}")
+            await query.edit_message_text("حدث خطأ أثناء إعادة الصياغة، حاول لاحقًا.")
+
+    elif data == "change_lang":
+        # فقط مثال: إعادة تعيين المحادثة مع رسالة بالإنجليزية أو العربية
+        user_contexts[user_id] = []
+        user_service_idx[user_id] = 0
+        await query.edit_message_text(
+            "تمت إعادة تعيين المحادثة.\nيرجى كتابة سؤالك باللغة التي تفضلها الآن."
+        )
+    else:
+        await query.edit_message_text("الزر غير معروف.")
+
+# --- نقطة بداية البوت ---
+def main():
+    if not BOT_TOKEN or not HF_API_TOKEN:
+        logger.error("BOT_TOKEN أو HF_API_TOKEN غير معرفين في متغيرات البيئة.")
+        return
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("about", about))
-    app.add_handler(CommandHandler("feedback", feedback))
+    app.add_handler(CommandHandler("reset", reset))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_query))
+    app.add_handler(CallbackQueryHandler(button_handler))
 
-    app.add_handler(MessageHandler(filters.Regex("^(\ud83c\uddec\ud83c\udde7 English|\ud83c\uddf8\ud83c\udde6 العربية)$"), set_language))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply_to_user))
-
+    logger.info("البوت بدأ العمل...")
     app.run_polling()
+
+if __name__ == "__main__":
+    main()
