@@ -4,8 +4,9 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 from huggingface_hub import InferenceApi
 
 # إعداد المفاتيح
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-HF_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+allowed_users = os.environ.get('ALLOWED_USERS')  # غالبًا قائمة أرقام أو أسماء مفصولة بفواصل
+bot_token = os.environ.get('BOT_TOKEN')
+hf_api_token = os.environ.get('HF_API_TOKEN')
 inference = InferenceApi(repo_id="mistralai/Mixtral-8x7B-Instruct", token=HF_API_KEY)
 
 # تخزين لغة كل مستخدم
