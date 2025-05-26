@@ -6,7 +6,7 @@ from huggingface_hub import InferenceApi
 # إعداد المفاتيح
 bot_token = os.environ.get('BOT_TOKEN')
 hf_api_token = os.environ.get('HF_API_TOKEN')
-inference = InferenceApi(repo_id="mistralai/Mixtral-8x7B-Instruct", token=HF_API_KEY)
+inference = InferenceApi(repo_id="mistralai/Mixtral-8x7B-Instruct", token=hf_api_token)
 
 # تخزين لغة كل مستخدم
 user_lang = {}
@@ -34,9 +34,10 @@ error_text = {
 # دالة بدء المحادثة
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[k] for k in languages.keys()]
+    # نرسل رسالة الترحيب باللغتين لتغطية الجميع
     await update.message.reply_text(
-        "🌐 Please choose your language:\n🌐 اختر لغتك:",
-        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True)
+        welcome_text["en"] + "\n" + welcome_text["ar"],
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     )
 
 # حفظ اللغة المختارة
@@ -65,7 +66,7 @@ async def reply_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # تشغيل البوت
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(bot_token).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Regex("^(🇬🇧 English|🇸🇦 العربية)$"), set_language))
