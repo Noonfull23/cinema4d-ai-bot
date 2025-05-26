@@ -1,2 +1,9 @@
-python-telegram-bot==20.8
-huggingface_hub==0.23.1
+python-telegram-bot
+huggingface_hub
+transformers
+torch
+langdetect
+python-telegram-bot==20.6
+uvicorn
+fastapi
+
