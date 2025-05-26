@@ -3,34 +3,33 @@ name: Deploy to Hugging Face Space
 on:
   push:
     branches:
-      - main  # غيّر حسب فرعك الرئيسي
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      C4D_BOT: ${{ secrets.C4D_BOT }}
+
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v3
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: 3.9
+          python-version: "3.10"
 
-      - name: Install git-lfs
-        run: sudo apt-get install git-lfs
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
 
-      - name: Configure git user
+      - name: Login to Hugging Face CLI
+        run: huggingface-cli login --token ${{ secrets.HF_TOKEN }}
+
+      - name: Configure Git
         run: |
-          git config --global user.email "you@example.com"
-          git config --global user.name "Your Name"
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
 
-      - name: Login to Hugging Face Hub
-        run: huggingface-cli login --token ${{ secrets.C4D_BOT }}
-
-      - name: Push to Hugging Face Space repo
+      - name: Push to Hugging Face Space
         run: |
-          git remote add hf https://huggingface.co/spaces/USERNAME/REPO_NAME.git
-          git push hf HEAD:main --force
+          git remote add hf https://huggingface.co/spaces/Cinema4dArabic/cinema_4d_hub
+          git push hf main --force
