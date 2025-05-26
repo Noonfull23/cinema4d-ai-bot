@@ -3,44 +3,30 @@ name: Deploy to Hugging Face Space
 on:
   push:
     branches:
-      - main  # أو أي فرع تريد تفعيله عليه
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout this repository
-        uses: actions/checkout@v3
+    - name: Checkout repo
+      uses: actions/checkout@v3
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
 
-      - name: Install huggingface_hub
-        run: pip install huggingface_hub
+    - name: Install huggingface_hub
+      run: pip install huggingface_hub
 
-      - name: Login to Hugging Face CLI and configure git credentials
-        run: huggingface-cli login --token ${{ secrets.HF_TOKEN }} --add-to-git-credential
+    - name: Login to Hugging Face CLI
+      run: huggingface-cli login --token ${{ secrets.HF_TOKEN }}
 
-      - name: Clone Hugging Face Space repo
-        run: git clone https://huggingface.co/spaces/Cinema4dArabic/cinema_4d_hub
-
-      # الآن يمكنك إضافة خطوات البناء أو التحديث داخل مجلد المستودع المنسوخ
-      # مثلا نسخ الملفات أو بناء Docker أو رفع ملفات جديدة ...
-
-      # مثال: نسخ ملفات من المستودع الحالي إلى مجلد المستودع المنسوخ
-      - name: Copy files to HF Space repo
-        run: |
-          cp -r ./main/* ./cinema_4d_hub/
-
-      - name: Commit and push changes to HF Space repo
-        working-directory: ./cinema_4d_hub
-        run: |
-          git config user.email "actions@github.com"
-          git config user.name "GitHub Actions"
-          git add .
-          git commit -m "Update Space from GitHub Actions" || echo "No changes to commit"
-          git push
-
+    - name: Push to Hugging Face Space
+      run: |
+        git config --global user.email "you@example.com"
+        git config --global user.name "Your Name"
+        git remote add hf https://huggingface.co/spaces/Cinema4dArabic/cinema_4d_hub
+        git push hf main --force
