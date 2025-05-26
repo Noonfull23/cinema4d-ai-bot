@@ -7,7 +7,7 @@ from huggingface_hub import InferenceClient
 bot_token = os.environ.get('BOT_TOKEN')
 hf_api_token = os.environ.get('HF_API_TOKEN')
 
-# إنشاء عميل استدعاء النموذج
+# إنشاء عميل الاستدلال
 client = InferenceClient(token=hf_api_token)
 
 # تخزين لغة كل مستخدم
@@ -59,13 +59,8 @@ async def reply_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = f"Answer this question about Cinema 4D in {lang}:\n{query}"
 
     try:
-        response = client.text_generation(
-            model="mistralai/Mixtral-8x7B-Instruct-v0.1",
-            inputs=prompt,
-            parameters={"max_new_tokens": 150}
-        )
-        # response هي قائمة، نأخذ النص من العنصر الأول
-        generated_text = response[0].get("generated_text", help_text[lang])
+        result = client.text_generation("mistralai/Mixtral-8x7B-Instruct-v0.1", prompt)
+        generated_text = result[0].get("generated_text", help_text[lang])
         await update.message.reply_text(generated_text)
     except Exception as e:
         print(f"Error: {e}")
