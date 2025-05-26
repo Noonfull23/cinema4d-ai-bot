@@ -6,7 +6,7 @@ from huggingface_hub import InferenceApi
 # إعداد المفاتيح
 bot_token = os.environ.get('BOT_TOKEN')
 hf_api_token = os.environ.get('HF_API_TOKEN')
-inference = InferenceApi(repo_id="mistralai/Mixtral-8x7B-Instruct", token=hf_api_token)
+inference = InferenceApi(repo_id = "mistralai/Mixtral-8x7B-Instruct-v0.1", token=hf_api_token)
 
 # تخزين لغة كل مستخدم
 user_lang = {}
