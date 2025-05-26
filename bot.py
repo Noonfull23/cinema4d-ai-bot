@@ -1,157 +1,116 @@
 import os
-import logging
 import asyncio
-from typing import Optional
-
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
-)
-
+from telegram import Update, ReplyKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from huggingface_hub import InferenceClient
-from functools import wraps
 
-# --- إعداد السجلات (Logging) ---
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
-)
-logger = logging.getLogger(__name__)
+# إعداد المفاتيح من المتغيرات البيئية
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
+HF_API_TOKEN = os.environ.get('HF_API_TOKEN')
 
-# --- إعداد المتغيرات البيئية ---
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-HF_API_TOKEN = os.environ.get("HF_API_TOKEN")
 MODEL_ID = "mistralai/Mixtral-8x7B-Instruct-v0.1"
 
-# --- إعداد عميل Huggingface ---
+# إنشاء عميل InferenceClient
 client = InferenceClient(token=HF_API_TOKEN)
 
-# --- دعم لغات متعددة + رسائل مرنة ---
+# تخزين لغة كل مستخدم مؤقتاً في الذاكرة
+user_lang = {}
+
 languages = {
     "🇬🇧 English": "en",
-    "🇸🇦 العربية": "ar",
+    "🇸🇦 العربية": "ar"
 }
 
-messages = {
-    "welcome": {
-        "en": "Welcome to the Cinema 4D Assistant Bot!\nChoose your language:",
-        "ar": "مرحبًا بك في مساعد Cinema 4D!\nيرجى اختيار لغتك:",
-    },
-    "help": {
-        "en": "Ask me anything related to Cinema 4D, and I’ll try to help!",
-        "ar": "اسألني عن أي شيء يخص Cinema 4D وسأحاول مساعدتك!",
-    },
-    "error": {
-        "en": "❌ Something went wrong. Please try again later.",
-        "ar": "❌ حدث خطأ ما. حاول مرة أخرى لاحقًا.",
-    },
-    "timeout": {
-        "en": "⏳ The request timed out. Please try again.",
-        "ar": "⏳ انتهى وقت الانتظار. يرجى المحاولة مرة أخرى.",
-    },
-    "invalid_language": {
-        "en": "Invalid choice. Please select a language from the keyboard.",
-        "ar": "اختيار غير صالح. يرجى اختيار اللغة من لوحة المفاتيح.",
-    }
+welcome_text = {
+    "en": "Welcome to the Cinema 4D Assistant Bot!\nChoose your language:",
+    "ar": "مرحبًا بك في مساعد Cinema 4D!\nيرجى اختيار لغتك:"
 }
 
-# --- تخزين لغة المستخدم بشكل دائم (في الذاكرة فقط حالياً) ---
-user_languages = {}
+help_text = {
+    "en": "Ask me anything related to Cinema 4D, and I’ll try to help!",
+    "ar": "اسألني عن أي شيء يخص Cinema 4D وسأحاول مساعدتك!"
+}
 
-# --- دالة retry مع تأخير متزايد ---
+error_text = {
+    "en": "❌ Something went wrong. Please try again.",
+    "ar": "❌ حدث خطأ ما. حاول مرة أخرى."
+}
+
+# دالة retry ذكية مع exponential backoff لتفادي الأخطاء المؤقتة
 def async_retry(retries=3, delay=2, backoff=2):
     def decorator(func):
-        @wraps(func)
         async def wrapper(*args, **kwargs):
-            current_delay = delay
-            for attempt in range(1, retries + 1):
+            m_retries = retries
+            m_delay = delay
+            for attempt in range(m_retries):
                 try:
                     return await func(*args, **kwargs)
                 except Exception as e:
-                    logger.warning(f"Attempt {attempt} failed: {e}")
-                    if attempt == retries:
-                        logger.error(f"All {retries} attempts failed.")
+                    if attempt == m_retries - 1:
                         raise
-                    await asyncio.sleep(current_delay)
-                    current_delay *= backoff
+                    await asyncio.sleep(m_delay)
+                    m_delay *= backoff
         return wrapper
     return decorator
 
-# --- دالة منفصلة لاستدعاء API مع retry و timeout ---
+# دالة استدعاء النموذج مع retry و timeout
 @async_retry(retries=3, delay=2, backoff=2)
 async def query_model(prompt: str, timeout: int = 15) -> str:
     loop = asyncio.get_event_loop()
-    # استدعاء blocking API داخل ThreadPoolExecutor باستخدام run_in_executor
+    # استدعاء blocking function في executor
     result = await asyncio.wait_for(
         loop.run_in_executor(
             None,
-            lambda: client.text_generation(MODEL_ID, inputs=prompt)
+            lambda: client.text_generation(MODEL_ID, prompt)
         ),
-        timeout=timeout,
+        timeout=timeout
     )
+    # النتيجة تكون قائمة من dicts
     if isinstance(result, list) and len(result) > 0:
         return result[0].get("generated_text", "")
     return ""
 
-# --- أوامر البوت --- 
-
+# بدء المحادثة مع اختيار اللغة
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[k] for k in languages.keys()]
     await update.message.reply_text(
-        messages["welcome"]["en"] + "\n" + messages["welcome"]["ar"],
-        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True),
+        welcome_text["en"] + "\n" + welcome_text["ar"],
+        reply_markup=ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     )
 
+# حفظ اللغة التي اختارها المستخدم
 async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang_key = update.message.text
-    user_id = update.effective_user.id
     if lang_key in languages:
-        user_languages[user_id] = languages[lang_key]
-        await update.message.reply_text(
-            messages["help"][languages[lang_key]],
-            reply_markup=ReplyKeyboardRemove(),
-        )
-        logger.info(f"User {user_id} set language to {languages[lang_key]}")
+        user_lang[update.effective_user.id] = languages[lang_key]
+        await update.message.reply_text(help_text[languages[lang_key]])
     else:
-        await update.message.reply_text(messages["invalid_language"]["en"] + " / " + messages["invalid_language"]["ar"])
+        await update.message.reply_text("Invalid choice / اختيار غير صالح.")
 
+# الرد على استفسارات المستخدمين
 async def reply_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    lang = user_languages.get(user_id, "en")
+    lang = user_lang.get(user_id, "en")
     query = update.message.text
 
     prompt = f"Answer this question about Cinema 4D in {lang}:\n{query}"
 
     try:
-        response = await query_model(prompt)
-        if not response.strip():
-            response = messages["error"][lang]
-        await update.message.reply_text(response)
-    except asyncio.TimeoutError:
-        await update.message.reply_text(messages["timeout"][lang])
+        answer = await query_model(prompt)
+        if answer.strip():
+            await update.message.reply_text(answer)
+        else:
+            await update.message.reply_text(help_text[lang])
     except Exception as e:
-        logger.error(f"Unexpected error for user {user_id}: {e}")
-        await update.message.reply_text(messages["error"][lang])
+        print(f"Error: {e}")
+        await update.message.reply_text(error_text[lang])
 
-# --- نقطة الدخول ---
-
-def main():
-    if not BOT_TOKEN or not HF_API_TOKEN:
-        logger.error("Missing BOT_TOKEN or HF_API_TOKEN environment variables!")
-        exit(1)
-
+if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.Regex("^(🇬🇧 English|🇸🇦 العربية)$"), set_language))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, reply_to_user))
 
-    logger.info("Bot started...")
+    print("Bot is running...")
     app.run_polling()
-
-if __name__ == "__main__":
-    main()
